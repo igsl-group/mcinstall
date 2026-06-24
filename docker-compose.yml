@@ -1,0 +1,211 @@
+# =============================================================================
+# MCdesk — Unified Docker Compose
+# Backend (7080) + Nginx Vue Frontend (80) + PostgreSQL + Redis + Kafka
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL
+  # ---------------------------------------------------------------------------
+  postgres:
+    restart: unless-stopped
+    image: postgres:16-alpine
+    container_name: mcdesk-postgres
+    environment:
+      POSTGRES_DB: ${MCDESK_DB_NAME:-mcdesk}
+      POSTGRES_USER: ${MCDESK_DB_USER:-mcdesk}
+      POSTGRES_PASSWORD: ${MCDESK_DB_PASSWORD}
+      TZ: ${TZ:-Asia/Hong_Kong}
+      PGTZ: ${TZ:-Asia/Hong_Kong}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - mcdesk-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MCDESK_DB_USER:-mcdesk} -d ${MCDESK_DB_NAME:-mcdesk}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
+  redis:
+    restart: unless-stopped
+    image: redis:7-alpine
+    container_name: mcdesk-redis
+    # Redis runs without authentication by default to match the MCdesk reference
+    # configuration. Set MCDESK_REDIS_PASSWORD to enable authentication.
+    command: >
+      sh -c 'if [ -n "${MCDESK_REDIS_PASSWORD}" ]; then
+        redis-server --appendonly yes --requirepass "${MCDESK_REDIS_PASSWORD}";
+      else
+        redis-server --appendonly yes;
+      fi'
+    environment:
+      MCDESK_REDIS_PASSWORD: ${MCDESK_REDIS_PASSWORD:-}
+    volumes:
+      - redis-data:/data
+    networks:
+      - mcdesk-net
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"${MCDESK_REDIS_PASSWORD}\" ]; then redis-cli -a \"${MCDESK_REDIS_PASSWORD}\" ping | grep PONG; else redis-cli ping | grep PONG; fi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Zookeeper (required by Kafka)
+  # ---------------------------------------------------------------------------
+  zookeeper:
+    restart: unless-stopped
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: mcdesk-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      TZ: ${TZ:-Asia/Hong_Kong}
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks:
+      - mcdesk-net
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/localhost/2181'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Kafka
+  # ---------------------------------------------------------------------------
+  kafka:
+    restart: unless-stopped
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: mcdesk-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      TZ: ${TZ:-Asia/Hong_Kong}
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - mcdesk-net
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ---------------------------------------------------------------------------
+  # MCdesk Backend
+  # ---------------------------------------------------------------------------
+  mcdesk-backend:
+    restart: unless-stopped
+    image: repo.magiccreative.ai/magic-creative-docker-group/mcdesk-backend:${MCDESK_TAG}
+    container_name: mcdesk-backend
+    env_file:
+      - mcdesk.env
+    environment:
+      TZ: ${TZ:-Asia/Hong_Kong}
+      SERVER_PORT: 7080
+      DB_URL: jdbc:postgresql://postgres:5432/${MCDESK_DB_NAME:-mcdesk}
+      DB_USERNAME: ${MCDESK_DB_USER:-mcdesk}
+      DB_PASSWORD: ${MCDESK_DB_PASSWORD}
+      DB_DRIVER: org.postgresql.Driver
+      DB_JPA_DATABASE: postgresql
+      REDIS_MODEL: single
+      REDIS_SINGLE_HOST: redis
+      REDIS_SINGLE_PORT: 6379
+      REDIS_DB: ${MCDESK_REDIS_DB:-0}
+      REDIS_KEY_PREFIX: ${MCDESK_REDIS_KEY_PREFIX:-mcdesk}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    privileged: true
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - mcdesk-files:/data/files:rw
+    networks:
+      - mcdesk-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -sf http://localhost:7080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  # ---------------------------------------------------------------------------
+  # MCdesk Frontend (Nginx + Vue.js)
+  # ---------------------------------------------------------------------------
+  mcdesk-frontend:
+    restart: unless-stopped
+    image: repo.magiccreative.ai/magic-creative-docker-group/mcdesk-frontend:${MCDESK_TAG}
+    container_name: mcdesk-frontend
+    environment:
+      TZ: ${TZ:-Asia/Hong_Kong}
+    ports:
+      - "${MCDESK_FRONTEND_PORT:-80}:80"
+    volumes:
+      - ./mcdesk-nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - mcdesk-net
+    depends_on:
+      mcdesk-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -sf http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Cloudflare Tunnel (optional — start with --profile cloudflare)
+  # ---------------------------------------------------------------------------
+  cloudflared:
+    restart: unless-stopped
+    image: cloudflare/cloudflared:latest
+    container_name: mcdesk-cloudflared
+    command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - mcdesk-net
+    depends_on:
+      mcdesk-frontend:
+        condition: service_healthy
+    profiles:
+      - cloudflare
+
+networks:
+  mcdesk-net:
+    name: ${MCDESK_NETWORK_NAME:-mcdesk-net}
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  zookeeper-data:
+  zookeeper-log:
+  kafka-data:
+  mcdesk-files:
