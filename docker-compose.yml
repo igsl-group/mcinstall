@@ -9,16 +9,18 @@ services:
   # ---------------------------------------------------------------------------
   postgres:
     restart: unless-stopped
-    image: postgres:16-alpine
+    image: repo.magiccreative.ai/magic-creative-docker-group/postgres:17.6-vector-zhparser
     container_name: mcdesk-postgres
+    user: "0"
     environment:
-      POSTGRES_DB: ${MCDESK_DB_NAME:-mcdesk}
-      POSTGRES_USER: ${MCDESK_DB_USER:-mcdesk}
-      POSTGRES_PASSWORD: ${MCDESK_DB_PASSWORD}
+      POSTGRESQL_DATABASE: ${MCDESK_DB_NAME:-mcdesk}
+      POSTGRESQL_USERNAME: ${MCDESK_DB_USER:-mcdesk}
+      POSTGRESQL_PASSWORD: ${MCDESK_DB_PASSWORD}
+      POSTGRESQL_POSTGRES_PASSWORD: ${MCDESK_DB_PASSWORD}
       TZ: ${TZ:-Asia/Hong_Kong}
       PGTZ: ${TZ:-Asia/Hong_Kong}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/bitnami/postgresql/data
     networks:
       - mcdesk-net
     healthcheck:

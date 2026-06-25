@@ -62,7 +62,7 @@ export MCDESK_DB_BACKUP=/path/to/mcdesk_backup.sql.gz
 bash install.sh
 ```
 
-> **Note:** The MCdesk application image may fail to start from a completely empty database due to Flyway migration script incompatibilities with PostgreSQL. For a working deployment, restore from a known-good backup.
+> **Note:** The installer automatically installs the `zhparser` PostgreSQL extension before the backend starts, so a fresh empty database works out of the box. If you are deploying manually without `install.sh`, run `sql/init_zhparser.sql` as a PostgreSQL superuser before starting the backend.
 
 ## Non-Interactive / Automated Install
 
@@ -128,6 +128,6 @@ docker compose down -v
 - **Port 80 already in use**: choose a different frontend port during installation or stop the existing service.
 - **Cannot pull images**: ensure you are logged in to `repo.magiccreative.ai` (`docker login repo.magiccreative.ai`).
 - **Backend stays unhealthy**: check backend logs with `docker compose logs -f mcdesk-backend`.
-  - If you see `Flyway migration failed` with NOT-NULL constraint errors, restore from a database backup instead of starting with an empty database.
-- **Chinese full-text search features unavailable**: the default `postgres:16-alpine` image does not include the `zhparser` extension. This does not affect normal login or operation, but Chinese search features may be limited.
+  - If you see `Flyway migration failed` with `text search parser "zhparser" does not exist`, run `sql/init_zhparser.sql` as a PostgreSQL superuser on the `mcdesk` database.
+- **Chinese full-text search features**: require the `zhparser` extension. The installer installs it automatically; for manual deployments run `sql/init_zhparser.sql` as a PostgreSQL superuser before starting the backend.
 - **Cloudflare Tunnel not connecting**: verify the token in `.env` and check tunnel logs with `docker compose logs -f cloudflared`.

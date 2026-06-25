@@ -35,6 +35,9 @@ require_command() {
 }
 
 generate_password() {
+    # Disable pipefail locally; otherwise head closing the pipe early can make
+    # tr exit with SIGPIPE and abort the whole script.
+    set +o pipefail
     tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24
 }
 
@@ -182,6 +185,7 @@ fi
 log_info "Installing MCdesk to: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
+INSTALL_DIR="$(pwd)"
 
 # Copy bundled assets if running from the same repository,
 # otherwise download from the distribution URL.
@@ -190,11 +194,17 @@ if [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
     cp -f "$SCRIPT_DIR/docker-compose.yml" "$INSTALL_DIR/"
     cp -f "$SCRIPT_DIR/mcdesk.env" "$INSTALL_DIR/"
     cp -f "$SCRIPT_DIR/mcdesk-nginx.conf" "$INSTALL_DIR/"
+    if [[ -f "$SCRIPT_DIR/sql/init_zhparser.sql" ]]; then
+        mkdir -p "$INSTALL_DIR/sql"
+        cp -f "$SCRIPT_DIR/sql/init_zhparser.sql" "$INSTALL_DIR/sql/"
+    fi
 else
     log_info "Downloading compose files..."
     curl -fsSL -o docker-compose.yml  "https://raw.githubusercontent.com/magiccreative/one-liner-installation/main/docker-compose.yml"
     curl -fsSL -o mcdesk.env          "https://raw.githubusercontent.com/magiccreative/one-liner-installation/main/mcdesk.env"
     curl -fsSL -o mcdesk-nginx.conf   "https://raw.githubusercontent.com/magiccreative/one-liner-installation/main/mcdesk-nginx.conf"
+    mkdir -p "$INSTALL_DIR/sql"
+    curl -fsSL -o "$INSTALL_DIR/sql/init_zhparser.sql" "https://raw.githubusercontent.com/magiccreative/one-liner-installation/main/sql/init_zhparser.sql"
 fi
 
 # ---------------------------------------------------------------------------
@@ -250,6 +260,28 @@ for i in {1..30}; do
     fi
     sleep 1
 done
+
+# The bitnami PostgreSQL container creates the application database
+# asynchronously after the daemon starts. Wait until it actually exists.
+log_info "Waiting for MCdesk database '${DB_NAME}' to be created..."
+for i in {1..30}; do
+    if $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" --env-file "$INSTALL_DIR/.env" exec -T -e PGPASSWORD="${DB_PASSWORD}" postgres psql -U postgres -d "${DB_NAME}" -c "SELECT 1" &>/dev/null; then
+        log_info "MCdesk database is ready."
+        break
+    fi
+    sleep 1
+done
+
+# MCdesk Flyway migrations require the zhparser PostgreSQL extension.
+# It must be installed by a superuser before the backend starts.
+ZHPARSER_SQL="$INSTALL_DIR/sql/init_zhparser.sql"
+if [[ -f "$ZHPARSER_SQL" ]]; then
+    log_info "Installing zhparser PostgreSQL extension..."
+    $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" --env-file "$INSTALL_DIR/.env" cp "$ZHPARSER_SQL" postgres:/tmp/init_zhparser.sql
+    $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" --env-file "$INSTALL_DIR/.env" exec -T -e PGPASSWORD="${DB_PASSWORD}" postgres psql -U postgres -d "${DB_NAME}" -f /tmp/init_zhparser.sql
+else
+    log_warn "zhparser initialization SQL not found; migrations may fail on an empty database."
+fi
 
 # Restore database backup if provided
 if [[ -n "$DB_BACKUP_FILE" ]]; then
