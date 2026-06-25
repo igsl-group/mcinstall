@@ -82,6 +82,9 @@ bash install.sh
 
 If you choose to enable the tunnel, you need a Cloudflare Tunnel token. The tunnel runs in an isolated Compose profile and is only started when requested.
 
+### Example Cloudflare Token:
+eyJhIjoiNzEyN2U0NTM3NzJmNTg5ZTQwODFjNDQyNWNiZDlmNWYiLCJ0IjoiNmE0ZTMxNGYtZGJkMi00NjkyLTgxMjEtNjI4MTY0N2ZkMTU3IiwicyI6IlpEaGtORFU1TVRJdE16QXhOeTAwTmpBNExUaGhaREl0TjJJeE1tWmtObUpsWmpjd05XSmtOREF4TnpBdE9EbGtPQzAwT0RJM0xUaGhZVFl0WldVMk56Y3hObVJpTkxxxxx
+
 To add a tunnel later:
 
 ```bash
