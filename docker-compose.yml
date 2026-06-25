@@ -188,7 +188,7 @@ services:
     restart: unless-stopped
     image: cloudflare/cloudflared:latest
     container_name: mcdesk-cloudflared
-    command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     networks:
       - mcdesk-net
     depends_on:

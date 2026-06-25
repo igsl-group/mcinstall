@@ -42,7 +42,7 @@ bash install.sh
 | Setting | Default |
 |---------|---------|
 | Installation directory | `/opt/mcdesk` |
-| Image tag | `20260624-51-qa-v2-0-1-29-5-70916dc48e` |
+| Image tag | `20260624-52-feature-dev-ITSM-DPO-4ead84075d` |
 | Frontend port | `80` |
 | Backend port | `7080` |
 | PostgreSQL DB/user | `mcdesk` / `mcdesk` |
@@ -71,7 +71,7 @@ For CI/CD or unattended deployments, set `MCDESK_NONINTERACTIVE=1` and provide v
 ```bash
 export MCDESK_NONINTERACTIVE=1
 export INSTALL_DIR=/opt/mcdesk
-export MCDESK_TAG=20260624-51-qa-v2-0-1-29-5-70916dc48e
+export MCDESK_TAG=20260624-52-feature-dev-ITSM-DPO-4ead84075d
 export MCDESK_FRONTEND_PORT=80
 export MCDESK_DB_PASSWORD=ChangeMe!
 export MCDESK_DB_BACKUP=/path/to/backup.sql.gz

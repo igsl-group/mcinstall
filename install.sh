@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Defaults
 # ---------------------------------------------------------------------------
 DEFAULT_INSTALL_DIR="/opt/mcdesk"
-DEFAULT_TAG="20260624-51-qa-v2-0-1-29-5-70916dc48e"
+DEFAULT_TAG="20260624-52-feature-dev-ITSM-DPO-4ead84075d"
 DEFAULT_FRONTEND_PORT="80"
 DEFAULT_BACKEND_PORT="7080"
 DEFAULT_DB_NAME="mcdesk"
@@ -133,7 +133,7 @@ REDIS_DB="${MCDESK_REDIS_DB:-}"
 REDIS_KEY_PREFIX="${MCDESK_REDIS_KEY_PREFIX:-}"
 NETWORK_NAME="${MCDESK_NETWORK_NAME:-}"
 TZ="${TZ:-}"
-ENABLE_CLOUDFLARE="${ENABLE_CLOUDFLARE:-N}"
+ENABLE_CLOUDFLARE="${ENABLE_CLOUDFLARE:-}"
 CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-}"
 DB_BACKUP_FILE="${MCDESK_DB_BACKUP:-}"
 
@@ -160,16 +160,20 @@ if [[ -z "$DB_PASSWORD" ]]; then
     log_info "Generated PostgreSQL password: $DB_PASSWORD"
 fi
 
-prompt_yn ENABLE_CLOUDFLARE "Enable Cloudflare Tunnel public access?" "N"
+# Default to enabling the tunnel when a token is already supplied.
+DEFAULT_ENABLE_CLOUDFLARE="N"
+[[ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]] && DEFAULT_ENABLE_CLOUDFLARE="Y"
+
+prompt_yn ENABLE_CLOUDFLARE "Enable Cloudflare Tunnel public access?" "$DEFAULT_ENABLE_CLOUDFLARE"
 
 if [[ "$ENABLE_CLOUDFLARE" == "y" || "$ENABLE_CLOUDFLARE" == "yes" ]]; then
-    prompt CLOUDFLARE_TUNNEL_TOKEN "Cloudflare Tunnel token" "" true
+    if [[ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]]; then
+        prompt CLOUDFLARE_TUNNEL_TOKEN "Cloudflare Tunnel token" "" true
+    fi
     if [[ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]]; then
         log_error "Cloudflare Tunnel token is required when tunnel is enabled."
         exit 1
     fi
-else
-    CLOUDFLARE_TUNNEL_TOKEN=""
 fi
 
 # ---------------------------------------------------------------------------
@@ -259,7 +263,7 @@ if [[ -n "$DB_BACKUP_FILE" ]]; then
 fi
 
 log_info "Starting MCdesk stack..."
-if [[ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]]; then
+if [[ "$ENABLE_CLOUDFLARE" == "y" || "$ENABLE_CLOUDFLARE" == "yes" ]]; then
     $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" --env-file "$INSTALL_DIR/.env" --profile cloudflare up -d
 else
     $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" --env-file "$INSTALL_DIR/.env" up -d
@@ -284,6 +288,22 @@ backend_status=$(docker inspect --format='{{.State.Health.Status}}' mcdesk-backe
 if [[ "$backend_status" != "healthy" ]]; then
     echo ""
     log_warn "Backend did not become healthy within the expected time."
+
+    # Preserve backend logs for post-install analysis without attempting any fixes.
+    if docker inspect mcdesk-backend &>/dev/null; then
+        ERROR_LOG_DIR="${INSTALL_DIR}/logs/errors"
+        mkdir -p "$ERROR_LOG_DIR"
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        if $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" --env-file "$INSTALL_DIR/.env" logs --no-color mcdesk-backend 2>&1 | grep -qi "flyway"; then
+            ERROR_NAME="flyway-migration-error"
+        else
+            ERROR_NAME="backend-unhealthy"
+        fi
+        ERROR_LOG_FILE="${ERROR_LOG_DIR}/${TIMESTAMP}_${ERROR_NAME}.log"
+        $COMPOSE_CMD -f "$INSTALL_DIR/docker-compose.yml" --env-file "$INSTALL_DIR/.env" logs --no-color mcdesk-backend > "$ERROR_LOG_FILE" 2>&1
+        log_warn "Backend logs saved to: $ERROR_LOG_FILE"
+    fi
+
     log_warn "Check logs with: $COMPOSE_CMD -f $INSTALL_DIR/docker-compose.yml logs -f mcdesk-backend"
 fi
 
